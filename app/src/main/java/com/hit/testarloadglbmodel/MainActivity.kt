@@ -6,14 +6,8 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isGone
 import androidx.lifecycle.lifecycleScope
-import com.google.ar.core.Anchor
 import com.google.ar.core.Config
-import com.google.ar.core.Plane
-import com.google.ar.core.TrackingFailureReason
 import io.github.sceneview.ar.ARSceneView
-import io.github.sceneview.ar.arcore.getUpdatedPlanes
-import io.github.sceneview.ar.getDescription
-import io.github.sceneview.ar.node.AnchorNode
 import io.github.sceneview.math.Position
 import io.github.sceneview.node.ModelNode
 import kotlinx.coroutines.launch
@@ -21,34 +15,22 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity(R.layout.activity_main) {
     companion object {
         private const val DEFAULT_MODEL_FILE = "model/Pocoyo_all_new.glb"
+        private const val MODEL_SCALE = 0.2f // Kích thước 20cm
+        private const val MODEL_DISTANCE = 1.0f // Khoảng cách 1m từ camera
+        private const val DEFAULT_ANIMATION = "Idle"
     }
 
     lateinit var sceneView: ARSceneView
     lateinit var loadingView: View
     lateinit var instructionText: TextView
 
+    var modelNode: ModelNode? = null
+
     var isLoading = false
         set(value) {
             field = value
             loadingView.isGone = !value
-        }
-
-    var anchorNode: AnchorNode? = null
-        set(value) {
-            if (field != value) {
-                field = value
-                updateInstructions()
-            }
-        }
-
-    var anchorNodeView: View? = null
-
-    var trackingFailureReason: TrackingFailureReason? = null
-        set(value) {
-            if (field != value) {
-                field = value
-                updateInstructions()
-            }
+            instructionText.isGone = value
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,7 +40,7 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
         loadingView = findViewById(R.id.loadingView)
         sceneView = findViewById<ARSceneView>(R.id.sceneView).apply {
             lifecycle = this@MainActivity.lifecycle
-            planeRenderer.isEnabled = true
+            planeRenderer.isEnabled = false
             configureSession { session, config ->
                 config.depthMode = when (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
                     true -> Config.DepthMode.AUTOMATIC
@@ -67,77 +49,50 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
                 config.instantPlacementMode = Config.InstantPlacementMode.DISABLED
                 config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
             }
-            onSessionUpdated = { _, frame ->
-                if (anchorNode == null) {
-                    frame.getUpdatedPlanes()
-                        .firstOrNull { it.type == Plane.Type.HORIZONTAL_UPWARD_FACING }
-                        ?.let { plane ->
-                            addAnchorNode(plane.createAnchor(plane.centerPose))
-                        }
-                }
-            }
-            onTrackingFailureChanged = { reason ->
-                this@MainActivity.trackingFailureReason = reason
-            }
         }
-//        sceneView.viewNodeWindowManager = ViewAttachmentManager(context, this).apply { onResume() }
+
+        loadModel()
     }
 
-    fun updateInstructions() {
-        instructionText.text = trackingFailureReason?.let {
-            it.getDescription(this)
-        } ?: if (anchorNode == null) {
-            "point_your_phone_down"
-        } else {
-            null
-        }
-    }
+    private fun loadModel() {
+        lifecycleScope.launch {
+            isLoading = true
+            instructionText.text = "Đang tải model..."
 
-    fun addAnchorNode(anchor: Anchor) {
-        sceneView.addChildNode(
-            AnchorNode(sceneView.engine, anchor)
-                .apply {
-                    isEditable = true
-                    lifecycleScope.launch {
-                        isLoading = true
-                        buildModelNode()?.let { addChildNode(it) }
-//                        buildViewNode()?.let { addChildNode(it) }
-                        isLoading = false
+            sceneView.modelLoader.loadModelInstance(DEFAULT_MODEL_FILE)?.let { modelInstance ->
+                modelNode = ModelNode(
+                    modelInstance = modelInstance,
+                    scaleToUnits = MODEL_SCALE,
+                    centerOrigin = Position(x = 0f, y = 0f, z = 0f)
+                ).apply {
+                    // Đặt model ở giữa màn hình, trước camera 1m
+                    position = Position(x = 0f, y = 0f, z = -MODEL_DISTANCE)
+                    isEditable = false
+
+                    // Dừng tất cả animation
+                    val count = animationCount
+                    for (i in 0 until count) {
+                        stopAnimation(i)
                     }
-                    anchorNode = this
+
+                    // Play animation Idle
+                    playAnimation(DEFAULT_ANIMATION, loop = true)
                 }
-        )
-    }
 
-    suspend fun buildModelNode(): ModelNode? {
-        sceneView.modelLoader.loadModelInstance(
-            DEFAULT_MODEL_FILE
-        )?.let { modelInstance ->
-            return ModelNode(
-                modelInstance = modelInstance,
-                // Scale to fit in a 0.5 meters cube
-                scaleToUnits = 0.5f,
-                // Bottom origin instead of center so the model base is on floor
-                centerOrigin = Position(0f,0f,-10f)
-            ).apply {
-                isEditable = true
+                // Xóa child nodes cũ và gắn model vào camera
+                sceneView.cameraNode.clearChildNodes()
+                sceneView.cameraNode.addChildNode(modelNode!!)
+                instructionText.text = ""
+            } ?: run {
+                instructionText.text = "Lỗi tải model"
             }
-        }
-        return null
-    }
 
-//    suspend fun buildViewNode(): ViewNode? {
-//        return withContext(Dispatchers.Main) {
-//            val engine = sceneView.engine
-//            val materialLoader = sceneView.materialLoader
-//            val windowManager = sceneView.viewNodeWindowManager ?: return@withContext null
-//            val view = LayoutInflater.from(materialLoader.context).inflate(R.layout.view_node_label, null, false)
-//            val ViewAttachmentManager(context, this).apply { onResume() }
-//            val viewNode = ViewNode(engine, windowManager, materialLoader, view, true, true)
-//            viewNode.position = Position(0f, -0.2f, 0f)
-//            anchorNodeView = view
-//            viewNode
-//        }
-//    }
+            isLoading = false
+        }
+    }
 
 }
+
+
+
+
