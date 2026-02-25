@@ -49,7 +49,9 @@ class MainActivity : BaseActivity() {
             }
         }
 
-        loadModel()
+        delayToAction(3000L) {
+            loadModel()
+        }
     }
 
     private fun loadModel() {
