@@ -3,16 +3,14 @@ package com.hit.testarloadglbmodel
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isGone
-import androidx.lifecycle.lifecycleScope
 import com.google.ar.core.Config
 import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.math.Position
 import io.github.sceneview.node.ModelNode
-import kotlinx.coroutines.launch
+import kotlin.coroutines.EmptyCoroutineContext
 
-class MainActivity : AppCompatActivity(R.layout.activity_main) {
+class MainActivity : BaseActivity() {
     companion object {
         private const val DEFAULT_MODEL_FILE = "model/Pocoyo_all_new.glb"
         private const val MODEL_SCALE = 0.2f // Kích thước 20cm
@@ -30,12 +28,12 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
         set(value) {
             field = value
             loadingView.isGone = !value
-            instructionText.isGone = value
+//            instructionText.isGone = value
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
+        setContentView(R.layout.activity_main)
         instructionText = findViewById(R.id.instructionText)
         loadingView = findViewById(R.id.loadingView)
         sceneView = findViewById<ARSceneView>(R.id.sceneView).apply {
@@ -55,11 +53,17 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
     }
 
     private fun loadModel() {
-        lifecycleScope.launch {
+        launchCoroutine(EmptyCoroutineContext) {
             isLoading = true
-            instructionText.text = "Đang tải model..."
+
+            mainScope {
+                instructionText.text = "Đang tải model..."
+                logDebug("loadModel: start load model")
+            }
+
 
             sceneView.modelLoader.loadModelInstance(DEFAULT_MODEL_FILE)?.let { modelInstance ->
+                logInfo("loadModel: load model done")
                 modelNode = ModelNode(
                     modelInstance = modelInstance,
                     scaleToUnits = MODEL_SCALE,
@@ -75,24 +79,26 @@ class MainActivity : AppCompatActivity(R.layout.activity_main) {
                         stopAnimation(i)
                     }
 
+                    logWarn("loadModel: play default animation(IDLE)")
                     // Play animation Idle
-                    playAnimation(DEFAULT_ANIMATION, loop = true)
+                    mainScope {
+                        playAnimation(DEFAULT_ANIMATION, loop = true)
+                    }
                 }
 
                 // Xóa child nodes cũ và gắn model vào camera
                 sceneView.cameraNode.clearChildNodes()
                 sceneView.cameraNode.addChildNode(modelNode!!)
-                instructionText.text = ""
+                mainScope {
+                    instructionText.text = "done"
+                }
             } ?: run {
-                instructionText.text = "Lỗi tải model"
+                mainScope {
+                    logError("loadModel: load model error")
+                    instructionText.text = "Lỗi tải model"
+                }
             }
-
             isLoading = false
         }
     }
-
 }
-
-
-
-
